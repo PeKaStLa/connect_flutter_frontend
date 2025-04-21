@@ -347,7 +347,7 @@ class _MapPageState extends State<MapPage> {
      );
   }
   // --- End buildMapWithControls ---
-
+  
 
   // --- _buildMap now accepts BOTH lists and builds Markers AND Circles ---
   Widget _buildMap(List<UserData> usersData, List<LocationData> areasData, LatLng initialCenter, double initialZoom, {bool showErrorOverlay = false, String? errorMessage}) { // Added areasData
@@ -359,7 +359,7 @@ class _MapPageState extends State<MapPage> {
         point: area.center,
         radius: area.radius,
         useRadiusInMeter: true,
-        color: Colors.blue.withValues(alpha: 0.3), // Area color
+        color: Colors.blue.withOpacity(0.3), // Area color (Corrected opacity usage)
         borderColor: Colors.blue,
         borderStrokeWidth: 2,
       );
@@ -369,24 +369,26 @@ class _MapPageState extends State<MapPage> {
 
     // --- Create Markers from the user list ---
     List<Marker> markers = usersData.map((user) { // Use usersData
+
+       // --- Calculate marker size based on current zoom ---
+       // Use _currentZoom which reflects the live map state
+       final double markerSize =  (_currentZoom >= 15.0) ? 18.0 : (_currentZoom >= 12.0) ? 12.0 :  (_currentZoom >= 8.0) ? 8.0 :  (_currentZoom >= 6.0) ? 6.0 : 4.0;
+       // -------------------------------------------------
+
        return Marker(
           point: user.center,
-          // --- Adjust Marker size for the dot ---
-          width: 12,  // Smaller width
-          height: 12, // Smaller height
-          // ------------------------------------
+          // --- Use calculated marker size ---
+          width: markerSize,
+          height: markerSize,
+          // --------------------------------
           child: Tooltip( // Keep tooltip for info
             message: '${user.username}\nLat: ${user.center.latitude.toStringAsFixed(4)}, Lng: ${user.center.longitude.toStringAsFixed(4)}',
-            // --- Replace Icon with a styled Container ---
             child: Container(
               decoration: const BoxDecoration(
                 color: Colors.brown, // User color
                 shape: BoxShape.circle,   // Make it round
-                // Optional: Add a border
-                // border: Border.all(color: Colors.black, width: 1),
               ),
             ),
-            // -----------------------------------------
           ),
        );
     }).toList();
@@ -399,7 +401,8 @@ class _MapPageState extends State<MapPage> {
           mapController: _mapController,
           options: MapOptions(
             initialCenter: initialCenter,
-            initialZoom: initialZoom,
+            // Use initialZoom from state for consistency, though _buildMap receives it too
+            initialZoom: _currentZoom, // Use state variable for initial render
             onMapEvent: _handleMapEvent,
             interactionOptions: const InteractionOptions(
               flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
@@ -408,7 +411,6 @@ class _MapPageState extends State<MapPage> {
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              // IMPORTANT: Replace with your actual package name
               userAgentPackageName: 'com.peter.connect_flutter_frontend', // <-- Replace if needed
               tileProvider: CancellableNetworkTileProvider(),
             ),
@@ -437,5 +439,6 @@ class _MapPageState extends State<MapPage> {
     );
   }
   // --- End _buildMap ---
+
 
 } // End _MapPageState
