@@ -359,22 +359,34 @@ class _MapPageState extends State<MapPage> {
         point: area.center,
         radius: area.radius,
         useRadiusInMeter: true,
-        color: Colors.blue.withOpacity(0.3), // Area color
+        color: Colors.blue.withValues(alpha: 0.3), // Area color
         borderColor: Colors.blue,
         borderStrokeWidth: 2,
       );
     }).toList();
     // --- END CircleMarker generation ---
 
+
     // --- Create Markers from the user list ---
     List<Marker> markers = usersData.map((user) { // Use usersData
        return Marker(
           point: user.center,
-          width: 80,
-          height: 80,
-          child: Tooltip(
+          // --- Adjust Marker size for the dot ---
+          width: 12,  // Smaller width
+          height: 12, // Smaller height
+          // ------------------------------------
+          child: Tooltip( // Keep tooltip for info
             message: '${user.username}\nLat: ${user.center.latitude.toStringAsFixed(4)}, Lng: ${user.center.longitude.toStringAsFixed(4)}',
-            child: const Icon(Icons.person_pin_circle, color: Colors.deepPurple, size: 40), // User color/icon
+            // --- Replace Icon with a styled Container ---
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Colors.brown, // User color
+                shape: BoxShape.circle,   // Make it round
+                // Optional: Add a border
+                // border: Border.all(color: Colors.black, width: 1),
+              ),
+            ),
+            // -----------------------------------------
           ),
        );
     }).toList();
