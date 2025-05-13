@@ -35,7 +35,7 @@ dependencies:
   http: ^1.3.0 # http
   logger: ^2.5.0 # logging
   provider: ^6.1.5
-
+  geolocator: ^14.0.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

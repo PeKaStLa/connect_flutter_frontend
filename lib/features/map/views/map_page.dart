@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:logger/logger.dart';
-
 import '../viewmodels/map_viewmodel.dart';
 import '../models/user_data.dart';
 import '../models/location_data.dart';
@@ -14,171 +11,203 @@ class MapPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Use context.watch<MapViewModel>() to listen to changes
-    final viewModel = context.watch<MapViewModel>();
-    final logger = Logger(); // Local logger for view-specific logs if needed
-
-    logger.d("MapPage rebuilding. isLoading: ${viewModel.isLoading}, errorMessage: ${viewModel.errorMessage}");
+    // Access the ViewModel
+    // final viewModel = Provider.of<MapViewModel>(context); // Not needed here due to Consumer
+    // viewModel.loadInitialData(); // Data is loaded in constructor or an init method in ViewModel
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(
-          viewModel.appBarTitle,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 16),
-        ),
+        title: const Text('World Map'),
+        actions: [
+          Consumer<MapViewModel>( // Use Consumer for actions that depend on ViewModel state
+            builder: (context, vm, child) {
+              return IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: vm.isLoading ? null : () => vm.refreshData(),
+                tooltip: 'Refresh Data',
+              );
+            }
+          )
+        ],
       ),
-      body: Builder( // Use Builder to ensure context for Scaffold is available if needed
-        builder: (context) {
-          if (viewModel.isLoading) {
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 10),
-                  Text("Authenticating and loading data..."),
-                ],
+      body: Consumer<MapViewModel>(
+        builder: (context, vm, child) {
+          if (vm.isLoading && vm.users.isEmpty && vm.areas.isEmpty) { // Show loading only if no data is present yet
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (vm.errorMessage != null && vm.users.isEmpty && vm.areas.isEmpty) { // Show error prominently if data fails to load initially
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('Error: ${vm.errorMessage}', textAlign: TextAlign.center),
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: () => vm.refreshData(),
+                      child: const Text('Try Refreshing'),
+                    )
+                  ],
+                ),
               ),
             );
           }
+          // If there's an error but we have some stale data, we can show the map with an error snackbar or overlay.
+          if (vm.errorMessage != null && (vm.users.isNotEmpty || vm.areas.isNotEmpty)) {
+             WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (ScaffoldMessenger.of(context).mounted) { // Check if mounted
+                  ScaffoldMessenger.of(context).removeCurrentSnackBar(); // Remove previous snackbar if any
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Could not refresh data: ${vm.errorMessage}'),
+                      backgroundColor: Colors.orangeAccent,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
+             });
+          }
 
-          // Note: Error display is now part of _buildMapWithControls
-          // We pass users and areas, even if empty on error,
-          // and initialCenter (which will be fallback on error).
-          // The showErrorOverlay and errorMessage will handle the visual error indication.
-          return _buildMapWithControls(
-            context, // Pass context for theme access if needed
-            viewModel,
-            viewModel.users,
-            viewModel.areas,
-            viewModel.initialMapCenter, // Use the calculated initial center
-            viewModel.currentZoom, // Use currentZoom from ViewModel for initial map options
-            showErrorOverlay: viewModel.errorMessage != null,
-            errorMessage: viewModel.errorMessage,
+          return Stack( // Use Stack to overlay buttons on the map
+            children: [
+              FlutterMap(
+                mapController: vm.mapController,
+                options: MapOptions(
+                  initialCenter: vm.initialCenter, // This will now be the device's location or default
+                  initialZoom: 13.0, // Zoom in a bit more for local view
+                  minZoom: 3,
+                  maxZoom: 18,
+                  onTap: (_, point) {
+                    // Example: Log tapped coordinates
+                    vm.pocketBaseService.logger.t('Map tapped at: ${point.latitude}, ${point.longitude}');
+                  },
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.example.app', // Replace with your app's package name
+                  ),
+                  // Display user markers
+                  MarkerLayer(markers: _buildUserMarkers(context, vm.users)),
+                  // Display area circles
+                  CircleLayer(circles: _buildAreaCircles(context, vm.areas)),
+                  // Optionally, a marker for the current user's initial position if desired
+                  // This marker shows where the map initially centered based on GPS/default.
+                  if (vm.initialCenter != const LatLng(37.7749, -122.4194) ) // Example: if not default San Francisco
+                    MarkerLayer(markers: [
+                      Marker(
+                        width: 80.0,
+                        height: 80.0,
+                        point: vm.initialCenter,
+                        child: const Icon(Icons.my_location, color: Colors.blueAccent, size: 30.0)
+                      )
+                    ])
+                ],
+              ),
+              Positioned( // Position the zoom buttons
+                right: 10,
+                bottom: 90, // Adjusted to be above the main FAB
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    FloatingActionButton.small(
+                      heroTag: "zoomInBtn", // Unique heroTag
+                      onPressed: () {
+                        final currentZoom = vm.mapController.camera.zoom;
+                        if (currentZoom < (vm.mapController.camera.maxZoom ?? 18)) {
+                           vm.mapController.move(vm.mapController.camera.center, currentZoom + 1);
+                        }
+                      },
+                      child: const Icon(Icons.add),
+                    ),
+                    const SizedBox(height: 8),
+                    FloatingActionButton.small(
+                      heroTag: "zoomOutBtn", // Unique heroTag
+                      onPressed: () {
+                        final currentZoom = vm.mapController.camera.zoom;
+                        if (currentZoom > (vm.mapController.camera.minZoom ?? 3)) {
+                          vm.mapController.move(vm.mapController.camera.center, currentZoom - 1);
+                        }
+                      },
+                      child: const Icon(Icons.remove),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           );
         },
+      ),
+      // Floating action button for manually centering on current location (optional)
+      floatingActionButton: FloatingActionButton(
+        heroTag: "myLocationBtn", // Ensure unique heroTag
+        onPressed: () {
+          // This will re-fetch location and all data, then center the map.
+          Provider.of<MapViewModel>(context, listen: false).refreshData();
+        },
+        tooltip: 'My Location / Refresh',
+        child: Consumer<MapViewModel>( // Show loading indicator on FAB if refreshing
+          builder: (context, vm, child) {
+            return vm.isLoading ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white)) : const Icon(Icons.my_location);
+          }
+        ),
       ),
     );
   }
 
-  Widget _buildMapWithControls(
-      BuildContext context, // Added context
-      MapViewModel viewModel, // Pass viewModel for actions
-      List<UserData> usersData,
-      List<LocationData> areasData,
-      LatLng initialCenter,
-      double initialZoom,
-      {bool showErrorOverlay = false,
-      String? errorMessage}) {
-    return Stack(
-      children: [
-        _buildMap(viewModel, usersData, areasData, initialCenter, initialZoom,
-            showErrorOverlay: showErrorOverlay, errorMessage: errorMessage),
-        Positioned(
-          top: 20,
-          right: 20,
+  List<Marker> _buildUserMarkers(BuildContext context, List<UserData> users) {
+    final viewModel = Provider.of<MapViewModel>(context, listen: false);
+    return users.map((user) {
+      return Marker(
+        width: 80.0, // Increased width for better text fit
+        height: 80.0,
+        point: user.center,
+        child: GestureDetector(
+          onTap: () {
+            viewModel.pocketBaseService.logger.i("Tapped on user: ${user.username}");
+            ScaffoldMessenger.of(context).removeCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('User: ${user.username} (ID: ${user.id})')),
+            );
+          },
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              FloatingActionButton.small(
-                heroTag: "zoomInBtn",
-                tooltip: 'Zoom In',
-                onPressed: viewModel.zoomIn, // Call ViewModel method
-                child: const Icon(Icons.add),
-              ),
-              const SizedBox(height: 8),
-              FloatingActionButton.small(
-                heroTag: "zoomOutBtn",
-                tooltip: 'Zoom Out',
-                onPressed: viewModel.zoomOut, // Call ViewModel method
-                child: const Icon(Icons.remove),
+              const Icon(Icons.person_pin_circle, color: Colors.blue, size: 30.0),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  user.username,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10),
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                )
               ),
             ],
           ),
         ),
-      ],
-    );
+      );
+    }).toList();
   }
 
-  Widget _buildMap(
-      MapViewModel viewModel, // Pass viewModel for controller and event handling
-      List<UserData> usersData,
-      List<LocationData> areasData,
-      LatLng initialCenter,
-      double initialZoom, // This is the initial zoom for MapOptions
-      {bool showErrorOverlay = false,
-      String? errorMessage}) {
-    final logger = Logger();
-    logger.d("Building map for ${usersData.length} users and ${areasData.length} areas. Initial Center: $initialCenter, Initial Zoom: $initialZoom");
-
-    List<CircleMarker> circles = areasData.map((area) {
+  List<CircleMarker> _buildAreaCircles(BuildContext context, List<LocationData> areas) {
+    // final viewModel = Provider.of<MapViewModel>(context, listen: false); // Not needed for this simple list
+    return areas.map((area) {
       return CircleMarker(
         point: area.center,
-        radius: area.radius,
+        radius: area.radius, // Radius in meters
         useRadiusInMeter: true,
-        color: Colors.blue.withValues(alpha: 0.3), // Corrected withOpacity
-        borderColor: Colors.blue,
+        color: Colors.red.withValues(alpha:0.3),
+        borderColor: Colors.red,
         borderStrokeWidth: 2,
+        // onTap not directly available on CircleMarker, handle via MapOptions.onTap and check proximity if needed
+        // For interactivity with circles, you'd typically check if the tap point is within any circle's bounds.
       );
     }).toList();
-
-    List<Marker> markers = usersData.map((user) {
-      final double markerSize = 10.0;
-      return Marker(
-        point: user.center,
-        width: markerSize,
-        height: markerSize,
-        child: Tooltip(
-          message: '${user.username}\nLat: ${user.center.latitude.toStringAsFixed(4)}, Lng: ${user.center.longitude.toStringAsFixed(4)}',
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.brown,
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-      );
-    }).toList();
-
-    return Stack(
-      children: [
-        FlutterMap(
-          mapController: viewModel.mapController, // Use ViewModel's controller
-          options: MapOptions(
-            initialCenter: initialCenter,
-            initialZoom: viewModel.currentZoom, // Use currentZoom for consistency on rebuilds
-            onMapEvent: viewModel.handleMapEvent, // Delegate to ViewModel
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-            ),
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.peter.connect_flutter_frontend',
-              tileProvider: CancellableNetworkTileProvider(),
-            ),
-            CircleLayer(circles: circles),
-            MarkerLayer(markers: markers),
-          ],
-        ),
-        if (showErrorOverlay)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              color: Colors.redAccent.withValues(alpha: 0.8), // Corrected withOpacity
-              padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
-              child: Text(
-                errorMessage ?? 'Error loading map data.',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
-      ],
-    );
   }
 }

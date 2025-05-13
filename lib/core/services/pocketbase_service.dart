@@ -20,6 +20,7 @@ class PocketBaseService {
   PocketBase get client => _pb; // Expose client if needed elsewhere, though unlikely with service pattern
   Logger get logger => _logger; // Expose logger if needed by ViewModel directly
 
+  // Existing authentication method with hardcoded credentials
   Future<void> authenticate() async {
     try {
       if (!_pb.authStore.isValid) {
@@ -43,10 +44,51 @@ class PocketBaseService {
     }
   }
 
+  // New login method for the login page
+  Future<bool> login(String email, String password) async {
+    try {
+      _logger.i('Attempting PocketBase login for: $email');
+      final authData = await _pb.collection('users').authWithPassword(
+        email,
+        password,
+      );
+      // After successful authentication, authStore is updated
+      if (_pb.authStore.isValid) {
+        _logger.i('PocketBase login successful. User ID: ${_pb.authStore.record?.id}, Token: ${_pb.authStore.token}');
+        _logger.d('Logged in user model: ${authData.record}');
+        return true;
+      }
+      _logger.w('PocketBase login attempt completed, but authStore is not valid.');
+      return false;
+    } on ClientException catch (e) {
+      _logger.e('PocketBase login failed for $email: ${e.statusCode} ${e.response}', error: e.originalError, stackTrace: StackTrace.current);
+      // You might want to parse e.response for more specific error messages to show the user
+      return false;
+    } catch (e, stackTrace) {
+      _logger.e('An unexpected error occurred during PocketBase login for $email', error: e, stackTrace: stackTrace);
+      return false;
+    }
+  }
+
+  void logout() {
+    _logger.i('User logging out. Clearing PocketBase authStore.');
+    _pb.authStore.clear();
+    _logger.i('User logged out from PocketBase.');
+  }
+
+  bool get isLoggedIn {
+    final bool valid = _pb.authStore.isValid;
+    _logger.d('Checking auth status: isValid = $valid');
+    return valid;
+  }
+
   Future<List<UserData>> fetchAllUsersData() async {
     const String usersCollection = 'users';
     _logger.i("Fetching users from '$usersCollection' collection...");
     try {
+      // Ensure authenticated before fetching data if your rules require it
+      // if (!isLoggedIn) await authenticate(); // Or handle appropriately
+
       final List<RecordModel> records = await _pb.collection(usersCollection).getFullList(sort: '-created');
       _logger.i('PB-response (Users): Fetched ${records.length} records');
 
@@ -103,11 +145,25 @@ class PocketBaseService {
     const String areasCollection = 'areas';
     _logger.i("Fetching areas from '$areasCollection' collection...");
     try {
+      // Ensure authenticated before fetching data if your rules require it
+      // if (!isLoggedIn) await authenticate(); // Or handle appropriately
+
       final List<RecordModel> records = await _pb.collection(areasCollection).getFullList();
       _logger.i('PB-response (Areas): Fetched ${records.length} records');
 
       _logger.d('--- Raw Area Records Data ---');
-      // ... (similar detailed logging as for users) ...
+      if (records.isEmpty) {
+        _logger.d('(No area records found)');
+      } else {
+        for (var i = 0; i < records.length; i++) {
+          final record = records[i];
+          try {
+            _logger.t('Area Record [$i] ID: ${record.id}, Data: ${jsonEncode(record.data)}');
+          } catch (e) {
+            _logger.w('Area Record [$i] ID: ${record.id}, Data: ${record.data} (jsonEncode failed: $e)');
+          }
+        }
+      }
       _logger.d('--- End Raw Area Records Data ---');
 
       final List<LocationData> areas = [];
