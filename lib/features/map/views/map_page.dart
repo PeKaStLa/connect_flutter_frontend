@@ -7,7 +7,9 @@ import '../models/user_data.dart';
 import '../models/location_data.dart';
 
 class MapPage extends StatelessWidget {
-  const MapPage({super.key});
+  final bool isBackgroundMode;
+
+  const MapPage({super.key, this.isBackgroundMode = false});
 
   @override
   Widget build(BuildContext context) {
@@ -16,57 +18,62 @@ class MapPage extends StatelessWidget {
     // viewModel.loadInitialData(); // Data is loaded in constructor or an init method in ViewModel
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('World Map'),
-        actions: [
-          Consumer<MapViewModel>( // Use Consumer for actions that depend on ViewModel state
-            builder: (context, vm, child) {
-              return IconButton(
-                icon: const Icon(Icons.refresh),
-                onPressed: vm.isLoading ? null : () => vm.refreshData(),
-                tooltip: 'Refresh Data',
-              );
-            }
-          )
-        ],
-      ),
+      appBar: isBackgroundMode
+          ? null
+          : AppBar(
+              title: const Text('World Map'),
+              actions: [
+                Consumer<MapViewModel>( // Use Consumer for actions that depend on ViewModel state
+                  builder: (context, vm, child) {
+                    return IconButton(
+                      icon: const Icon(Icons.refresh),
+                      onPressed: vm.isLoading ? null : () => vm.refreshData(),
+                      tooltip: 'Refresh Data',
+                    );
+                  },
+                )
+              ],
+            ),
       body: Consumer<MapViewModel>(
         builder: (context, vm, child) {
-          if (vm.isLoading && vm.users.isEmpty && vm.areas.isEmpty) { // Show loading only if no data is present yet
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (vm.errorMessage != null && vm.users.isEmpty && vm.areas.isEmpty) { // Show error prominently if data fails to load initially
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('Error: ${vm.errorMessage}', textAlign: TextAlign.center),
-                    const SizedBox(height: 10),
-                    ElevatedButton(
-                      onPressed: () => vm.refreshData(),
-                      child: const Text('Try Refreshing'),
-                    )
-                  ],
+          // In foreground mode, handle initial loading and error states before showing the map
+          if (!isBackgroundMode) {
+            if (vm.isLoading && vm.users.isEmpty && vm.areas.isEmpty) { // Show loading only if no data is present yet
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (vm.errorMessage != null && vm.users.isEmpty && vm.areas.isEmpty) { // Show error prominently if data fails to load initially
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('Error: ${vm.errorMessage}', textAlign: TextAlign.center),
+                      const SizedBox(height: 10),
+                      ElevatedButton(
+                        onPressed: () => vm.refreshData(),
+                        child: const Text('Try Refreshing'),
+                      )
+                    ],
+                  ),
                 ),
-              ),
-            );
-          }
-          // If there's an error but we have some stale data, we can show the map with an error snackbar or overlay.
-          if (vm.errorMessage != null && (vm.users.isNotEmpty || vm.areas.isNotEmpty)) {
-             WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (ScaffoldMessenger.of(context).mounted) { // Check if mounted
-                  ScaffoldMessenger.of(context).removeCurrentSnackBar(); // Remove previous snackbar if any
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Could not refresh data: ${vm.errorMessage}'),
-                      backgroundColor: Colors.orangeAccent,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-             });
+              );
+            }
+            // If there's an error but we have some stale data, show a snackbar in foreground mode.
+            if (vm.errorMessage != null && (vm.users.isNotEmpty || vm.areas.isNotEmpty)) {
+               WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (ScaffoldMessenger.of(context).mounted) { // Check if mounted
+                    ScaffoldMessenger.of(context).removeCurrentSnackBar(); // Remove previous snackbar if any
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Could not refresh data: ${vm.errorMessage}'),
+                        backgroundColor: Colors.orangeAccent,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+               });
+            }
           }
 
           return Stack( // Use Stack to overlay buttons on the map
@@ -105,54 +112,58 @@ class MapPage extends StatelessWidget {
                     ])
                 ],
               ),
-              Positioned( // Position the zoom buttons
-                right: 10,
-                bottom: 90, // Adjusted to be above the main FAB
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    FloatingActionButton.small(
-                      heroTag: "zoomInBtn", // Unique heroTag
-                      onPressed: () {
-                        final currentZoom = vm.mapController.camera.zoom;
-                        if (currentZoom < (vm.mapController.camera.maxZoom ?? 18)) {
-                           vm.mapController.move(vm.mapController.camera.center, currentZoom + 1);
-                        }
-                      },
-                      child: const Icon(Icons.add),
-                    ),
-                    const SizedBox(height: 8),
-                    FloatingActionButton.small(
-                      heroTag: "zoomOutBtn", // Unique heroTag
-                      onPressed: () {
-                        final currentZoom = vm.mapController.camera.zoom;
-                        if (currentZoom > (vm.mapController.camera.minZoom ?? 3)) {
-                          vm.mapController.move(vm.mapController.camera.center, currentZoom - 1);
-                        }
-                      },
-                      child: const Icon(Icons.remove),
-                    ),
-                  ],
+              // Only show zoom buttons if not in background mode
+              if (!isBackgroundMode)
+                Positioned(
+                  right: 10,
+                  bottom: 90, // Adjusted to be above the main FAB
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      FloatingActionButton.small(
+                        heroTag: "zoomInBtn", // Unique heroTag
+                        onPressed: () {
+                          final currentZoom = vm.mapController.camera.zoom;
+                          if (currentZoom < (vm.mapController.camera.maxZoom ?? 18)) {
+                             vm.mapController.move(vm.mapController.camera.center, currentZoom + 1);
+                          }
+                        },
+                        child: const Icon(Icons.add),
+                      ),
+                      const SizedBox(height: 8),
+                      FloatingActionButton.small(
+                        heroTag: "zoomOutBtn", // Unique heroTag
+                        onPressed: () {
+                          final currentZoom = vm.mapController.camera.zoom;
+                          if (currentZoom > (vm.mapController.camera.minZoom ?? 3)) {
+                            vm.mapController.move(vm.mapController.camera.center, currentZoom - 1);
+                          }
+                        },
+                        child: const Icon(Icons.remove),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
             ],
           );
         },
       ),
       // Floating action button for manually centering on current location (optional)
-      floatingActionButton: FloatingActionButton(
-        heroTag: "myLocationBtn", // Ensure unique heroTag
-        onPressed: () {
-          // This will re-fetch location and all data, then center the map.
-          Provider.of<MapViewModel>(context, listen: false).refreshData();
-        },
-        tooltip: 'My Location / Refresh',
-        child: Consumer<MapViewModel>( // Show loading indicator on FAB if refreshing
-          builder: (context, vm, child) {
-            return vm.isLoading ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white)) : const Icon(Icons.my_location);
-          }
-        ),
-      ),
+      floatingActionButton: isBackgroundMode
+          ? null
+          : FloatingActionButton(
+              heroTag: "myLocationBtn", // Ensure unique heroTag
+              onPressed: () {
+                // This will re-fetch location and all data, then center the map.
+                Provider.of<MapViewModel>(context, listen: false).refreshData();
+              },
+              tooltip: 'My Location / Refresh',
+              child: Consumer<MapViewModel>( // Show loading indicator on FAB if refreshing
+                builder: (context, vm, child) {
+                  return vm.isLoading ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white)) : const Icon(Icons.my_location);
+                },
+              ),
+            ),
     );
   }
 
@@ -178,7 +189,7 @@ class MapPage extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
+                  color: Colors.black.withValues(alpha: 0.6), // Corrected withOpacity
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -202,7 +213,7 @@ class MapPage extends StatelessWidget {
         point: area.center,
         radius: area.radius, // Radius in meters
         useRadiusInMeter: true,
-        color: Colors.red.withValues(alpha:0.3),
+        color: Colors.red.withValues(alpha: 0.3), // Corrected withOpacity
         borderColor: Colors.red,
         borderStrokeWidth: 2,
         // onTap not directly available on CircleMarker, handle via MapOptions.onTap and check proximity if needed
